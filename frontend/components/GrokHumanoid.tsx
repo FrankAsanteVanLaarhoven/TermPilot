@@ -50,8 +50,8 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 40);
-        camera.position.set(2.45, 1.35, 3.65);
-        camera.lookAt(0, 0.78, 0);
+        camera.position.set(2.8, 1.15, 3.4);
+        camera.lookAt(0, 0.74, 0);
         scene.add(new THREE.HemisphereLight(0xbfefff, 0x03060b, 2.4));
         const key = new THREE.DirectionalLight(0xffffff, 4.6);
         key.position.set(2.5, 4, 3.5);
@@ -72,9 +72,6 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
         const robot = await new Promise<import("urdf-loader").URDFRobot>((resolve, reject) => loader.load(URDF_HUMANOID, resolve, undefined, reject));
         if (disposed) { renderer.dispose(); return; }
         robot.rotation.x = -Math.PI / 2;
-        robot.rotation.z = Math.PI / 2;
-        robot.scale.setScalar(1.22);
-        robot.position.y = -0.7;
         scene.add(robot);
 
         const dark = new THREE.MeshPhysicalMaterial({ color: 0x05090d, metalness: 0.94, roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.1 });
@@ -90,6 +87,22 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
           edges.renderOrder = 2;
           node.add(edges);
         });
+
+        // URDF mesh sources do not all use the same authored unit scale. Fit the
+        // complete articulated hierarchy to a known stage height before placing
+        // the camera, preventing the camera from ending up inside a link mesh.
+        robot.updateMatrixWorld(true);
+        const rawBounds = new THREE.Box3().setFromObject(robot);
+        const rawSize = rawBounds.getSize(new THREE.Vector3());
+        if (!Number.isFinite(rawSize.y) || rawSize.y <= 0) throw new Error("Invalid URDF model bounds");
+        robot.scale.setScalar(1.58 / rawSize.y);
+        robot.updateMatrixWorld(true);
+        const fittedBounds = new THREE.Box3().setFromObject(robot);
+        const fittedCenter = fittedBounds.getCenter(new THREE.Vector3());
+        robot.position.x -= fittedCenter.x;
+        robot.position.z -= fittedCenter.z;
+        robot.position.y += -0.71 - fittedBounds.min.y;
+        robot.updateMatrixWorld(true);
 
         const head = robot.links.head_link;
         if (head) {
@@ -127,6 +140,7 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
 
         const clock = new THREE.Clock();
         const homeCamera = camera.position.clone();
+        const homeRobotY = robot.position.y;
         const animate = () => {
           if (disposed) return;
           const t = clock.getElapsedTime();
@@ -153,7 +167,7 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
             head.rotation.z += (p.x * -0.34 - head.rotation.z) * 0.08;
             head.rotation.y += ((-p.y * 0.2) + (thinking ? Math.sin(t * 1.8) * 0.045 : 0) - head.rotation.y) * 0.08;
           }
-          robot.position.y = -0.7 + Math.sin(t * 1.55) * 0.006;
+          robot.position.y = homeRobotY + Math.sin(t * 1.55) * 0.006;
           robot.rotation.y = Math.sin(t * 0.32) * 0.025;
           camera.position.x += (homeCamera.x + p.x * 0.18 - camera.position.x) * 0.035;
           camera.position.y += (homeCamera.y - p.y * 0.08 - camera.position.y) * 0.035;
@@ -183,7 +197,6 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
       <canvas ref={canvasRef} className="tp-bot-spline" aria-hidden />
       {modelState === "loading" && <div className="tp-bot-loading" aria-hidden><GrokBotMark size={72} mood={mood} /></div>}
       {modelState === "fallback" && <Image className="tp-bot-reference" src="/splash/grokbot-humanoid.png" alt="" fill priority sizes="(max-width: 900px) 100vw, 60vw" aria-hidden />}
-      <div className="tp-bot-badge"><GrokBotMark size={18} mood={mood} /><span>{tr("grokbot.name")}</span>{modelState === "ready" && <em>URDF · 29 DoF</em>}</div>
     </div>
   );
 }
