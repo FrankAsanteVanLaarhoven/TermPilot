@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { GrokBotMark, type BotMood } from "@/components/GrokBotMark";
 import { useI18n } from "@/components/Providers";
-import type { GrokExpression } from "@/lib/splineGrokRig";
+import { animateGrokRig, buildGrokRig, type GrokExpression } from "@/lib/splineGrokRig";
 
 export type { BotMood, GrokExpression };
 
-// Public Spline 3D robot mesh (Whobee). Interactive play-mode scene, not a still.
-export const SPLINE_HUMANOID =
-  "https://prod.spline.design/PyzDhpQ9E5f1E3MT/scene.splinecode";
-const SPLINE_VIEWER = "https://unpkg.com/@splinetool/viewer@1.10.51/build/spline-viewer.js";
+// Self-hosted Spline stage. The robot is assembled at runtime so TermPilot owns
+// the character rather than depending on an unrelated public Spline scene.
+export const SPLINE_HUMANOID = "/splash/stage.splinecode";
 
 export function GrokHumanoid({
   mood = "idle",
@@ -24,37 +24,61 @@ export function GrokHumanoid({
   className?: string;
 }) {
   const { tr } = useI18n();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const moodRef = useRef(mood);
+  const expressionRef = useRef(expression);
+  const gazeRef = useRef({ x: 0, y: 0 });
   const [spline, setSpline] = useState<"loading" | "ready" | "fallback">("loading");
 
+  moodRef.current = mood;
+  expressionRef.current = expression;
+
   useEffect(() => {
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (!cancelled) setSpline((prev) => (prev === "ready" ? prev : "fallback"));
-    }, 12000);
-
-    if (customElements.get("spline-viewer")) {
-      setSpline("ready");
-      window.clearTimeout(timer);
-      return () => {
-        cancelled = true;
-        window.clearTimeout(timer);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasEl = canvas;
+    let disposed = false;
+    let frame = 0;
+    let app: import("@splinetool/runtime").Application | undefined;
+    const trackPointer = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      gazeRef.current = {
+        x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width - 0.5) * 2)),
+        y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height - 0.5) * 2)),
       };
+    };
+    const releasePointer = () => { gazeRef.current = { x: 0, y: 0 }; };
+    canvas.addEventListener("pointermove", trackPointer);
+    canvas.addEventListener("pointerleave", releasePointer);
+    async function mount() {
+      try {
+        const { Application } = await import("@splinetool/runtime/build/runtime.standalone.webgl.js");
+        if (disposed) return;
+        app = new Application(canvasEl, { renderMode: "continuous", renderer: "webgl", htmlContentMode: "none" });
+        await app.load(SPLINE_HUMANOID);
+        if (disposed) return;
+        const rig = await buildGrokRig(app);
+        if (disposed) return;
+        setSpline("ready");
+        const started = performance.now();
+        const tick = (now: number) => {
+          if (disposed) return;
+          animateGrokRig(rig, { t: (now - started) / 1000, gazeX: gazeRef.current.x, gazeY: gazeRef.current.y, mood: moodRef.current, expression: expressionRef.current });
+          frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+      } catch (error) {
+        console.error("TermPilot Spline robot failed to load", error);
+        if (!disposed) setSpline("fallback");
+      }
     }
-
-    const script = document.createElement("script");
-    script.type = "module";
-    script.src = SPLINE_VIEWER;
-    script.onload = () => {
-      if (!cancelled) setSpline("ready");
-      window.clearTimeout(timer);
-    };
-    script.onerror = () => {
-      if (!cancelled) setSpline("fallback");
-    };
-    document.head.appendChild(script);
+    void mount();
     return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
+      disposed = true;
+      cancelAnimationFrame(frame);
+      canvas.removeEventListener("pointermove", trackPointer);
+      canvas.removeEventListener("pointerleave", releasePointer);
+      app?.dispose();
     };
   }, []);
 
@@ -64,19 +88,13 @@ export function GrokHumanoid({
       data-spline={spline}
       aria-label={tr("splash.spline")}
     >
-      {spline === "ready" && (
-        <spline-viewer
-          className="tp-bot-spline"
-          url={SPLINE_HUMANOID}
-          events-target="global"
-          loading-anim-type="spinner-small-dark"
-        />
-      )}
-      {spline !== "ready" && (
+      <canvas ref={canvasRef} className="tp-bot-spline" aria-hidden />
+      {spline === "loading" && (
         <div className="tp-bot-loading" aria-hidden>
           <GrokBotMark size={72} mood={mood} />
         </div>
       )}
+      {spline === "fallback" && <Image className="tp-bot-reference" src="/splash/grokbot-humanoid.png" alt="" fill priority sizes="(max-width: 900px) 100vw, 60vw" aria-hidden />}
       <div className="tp-bot-badge">
         <GrokBotMark size={18} mood={mood} />
         <span>{tr("grokbot.name")}</span>

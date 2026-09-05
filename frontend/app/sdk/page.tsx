@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export default function SdkPage() {
   return (
     <div className="min-h-screen bg-navy px-4 py-10 text-ink">
@@ -43,9 +45,9 @@ export default function SdkPage() {
           >
             Download app icon (desktop / home screen)
           </a>
-          <a className="text-sm text-mute underline" href="/">
+          <Link className="text-sm text-mute underline" href="/">
             Back to TermPilot
-          </a>
+          </Link>
         </div>
         <pre className="mt-6 overflow-auto rounded-2xl border border-steel bg-raised p-3 font-mono text-xs text-mute">{`const tp = new TermPilot("http://127.0.0.1:8000");
 await tp.health();
