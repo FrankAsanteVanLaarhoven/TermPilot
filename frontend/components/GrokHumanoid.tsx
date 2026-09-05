@@ -67,9 +67,22 @@ export function GrokHumanoid({ mood = "idle", expression = "idle", variant = "st
         floor.receiveShadow = true;
         scene.add(floor);
 
-        const loader = new URDFLoader();
+        const loadingManager = new THREE.LoadingManager();
+        const loader = new URDFLoader(loadingManager);
         loader.parseCollision = false;
-        const robot = await new Promise<import("urdf-loader").URDFRobot>((resolve, reject) => loader.load(URDF_HUMANOID, resolve, undefined, reject));
+        const robot = await new Promise<import("urdf-loader").URDFRobot>((resolve, reject) => {
+          let parsedRobot: import("urdf-loader").URDFRobot | undefined;
+          loadingManager.onLoad = () => {
+            if (parsedRobot) resolve(parsedRobot);
+          };
+          loadingManager.onError = (url) => reject(new Error(`Failed to load URDF asset: ${url}`));
+          loader.load(
+            URDF_HUMANOID,
+            (model) => { parsedRobot = model; },
+            undefined,
+            reject,
+          );
+        });
         if (disposed) { renderer.dispose(); return; }
         robot.rotation.x = -Math.PI / 2;
         scene.add(robot);
