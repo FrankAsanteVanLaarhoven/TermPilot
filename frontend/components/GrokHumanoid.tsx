@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { GrokBotMark, type BotMood } from "@/components/GrokBotMark";
 import { useI18n } from "@/components/Providers";
-import { animateGrokRig, buildGrokRig, type GrokExpression } from "@/lib/splineGrokRig";
 
-export type { BotMood, GrokExpression };
+export type GrokExpression = "idle" | "welcome" | "curious" | "listen" | "think" | "glad" | "careful";
+export type { BotMood };
 
-// Self-hosted Spline stage. The robot is assembled at runtime so TermPilot owns
-// the character rather than depending on an unrelated public Spline scene.
-export const SPLINE_HUMANOID = "/splash/stage.splinecode";
+// A production scene must be exported from the exact licensed Spline project.
+// Never substitute the previous primitive-generated approximation.
+export const SPLINE_HUMANOID = process.env.NEXT_PUBLIC_SPLINE_SCENE_URL ?? "";
 
 export function GrokHumanoid({
   mood = "idle",
@@ -25,48 +25,26 @@ export function GrokHumanoid({
 }) {
   const { tr } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const moodRef = useRef(mood);
-  const expressionRef = useRef(expression);
-  const gazeRef = useRef({ x: 0, y: 0 });
   const [spline, setSpline] = useState<"loading" | "ready" | "fallback">("loading");
-
-  moodRef.current = mood;
-  expressionRef.current = expression;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const canvasEl = canvas;
     let disposed = false;
-    let frame = 0;
     let app: import("@splinetool/runtime").Application | undefined;
-    const trackPointer = (event: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      gazeRef.current = {
-        x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width - 0.5) * 2)),
-        y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height - 0.5) * 2)),
-      };
-    };
-    const releasePointer = () => { gazeRef.current = { x: 0, y: 0 }; };
-    canvas.addEventListener("pointermove", trackPointer);
-    canvas.addEventListener("pointerleave", releasePointer);
     async function mount() {
       try {
+        if (!SPLINE_HUMANOID) {
+          setSpline("fallback");
+          return;
+        }
         const { Application } = await import("@splinetool/runtime/build/runtime.standalone.webgl.js");
         if (disposed) return;
         app = new Application(canvasEl, { renderMode: "continuous", renderer: "webgl", htmlContentMode: "none" });
         await app.load(SPLINE_HUMANOID);
         if (disposed) return;
-        const rig = await buildGrokRig(app);
-        if (disposed) return;
         setSpline("ready");
-        const started = performance.now();
-        const tick = (now: number) => {
-          if (disposed) return;
-          animateGrokRig(rig, { t: (now - started) / 1000, gazeX: gazeRef.current.x, gazeY: gazeRef.current.y, mood: moodRef.current, expression: expressionRef.current });
-          frame = requestAnimationFrame(tick);
-        };
-        frame = requestAnimationFrame(tick);
       } catch (error) {
         console.error("TermPilot Spline robot failed to load", error);
         if (!disposed) setSpline("fallback");
@@ -75,9 +53,6 @@ export function GrokHumanoid({
     void mount();
     return () => {
       disposed = true;
-      cancelAnimationFrame(frame);
-      canvas.removeEventListener("pointermove", trackPointer);
-      canvas.removeEventListener("pointerleave", releasePointer);
       app?.dispose();
     };
   }, []);
@@ -98,7 +73,7 @@ export function GrokHumanoid({
       <div className="tp-bot-badge">
         <GrokBotMark size={18} mood={mood} />
         <span>{tr("grokbot.name")}</span>
-        <em>{tr("splash.spline")}</em>
+        {spline === "ready" && <em>{tr("splash.spline")}</em>}
       </div>
     </div>
   );
